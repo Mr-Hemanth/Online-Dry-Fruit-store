@@ -254,7 +254,11 @@ const AdminProducts = () => {
         }
       } else {
         // Create new product
+        // Generate a unique ID for the new product
+        const newProductId = `product-${Date.now()}`;
+        
         const newProductData = {
+          id: newProductId, // Add the required ID field
           ...formData,
           price: Number(formData.price),
           stock: Number(formData.stock)

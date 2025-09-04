@@ -99,11 +99,22 @@ const Checkout = () => {
   // Fetch user addresses
   useEffect(() => {
     const fetchUserAddresses = async () => {
-      if (!user) return;
+      // Check if user exists and has a uid
+      if (!user || !user.uid) {
+        console.log('User not authenticated or missing uid');
+        setUserAddresses([]);
+        return;
+      }
       
       try {
         const response = await fetch(`${API_BASE_URL}/users/${user.uid}`);
         if (!response.ok) {
+          if (response.status === 404) {
+            // User not found - this might happen for new users
+            console.log('User not found in database, will create when saving address');
+            setUserAddresses([]);
+            return;
+          }
           throw new Error('Failed to fetch user data');
         }
         
@@ -111,6 +122,8 @@ const Checkout = () => {
         setUserAddresses(userData.addresses || []);
       } catch (error) {
         console.error('Error fetching addresses:', error);
+        // Set empty addresses array to avoid breaking the UI
+        setUserAddresses([]);
       }
     };
 
@@ -239,8 +252,8 @@ const Checkout = () => {
 
   // Check if address already exists in user's address book
   const isAddressNew = () => {
-    // If no saved addresses, it's definitely new
-    if (!userAddresses || userAddresses.length === 0) {
+    // If no user or no saved addresses, it's definitely new
+    if (!user || !user.uid || !userAddresses || userAddresses.length === 0) {
       return true;
     }
     
@@ -295,21 +308,16 @@ const Checkout = () => {
     });
   };
 
-  // Save address to user's address book if it's new
+  // Save new address to user's address book
   const saveAddressIfNew = async () => {
-    // Check if we should save the address (new address and within limit)
+    // Only save if user is authenticated and address is new
+    if (!user || !user.uid) {
+      console.log('User not authenticated, skipping address save');
+      return false;
+    }
+    
     if (isAddressNew()) {
-      if (userAddresses.length >= 4) {
-        // Inform user they've reached the limit
-        toast({
-          title: 'Address Limit Reached',
-          description: 'You have reached the maximum of 4 saved addresses. Please manage your addresses in your account settings.',
-          status: 'info',
-          duration: 5000,
-          isClosable: true,
-        });
-        return false; // Return false to indicate address was not saved
-      }
+      console.log('Saving new address to user\'s address book');
       
       try {
         // Parse address lines (assume addressLine1 is everything before first comma, rest is addressLine2)
@@ -399,7 +407,8 @@ const Checkout = () => {
       return;
     }
 
-    if (!user) {
+    // Check if user is authenticated
+    if (!user || !user.uid) {
       setError('Please log in to place an order');
       return;
     }
@@ -430,7 +439,15 @@ const Checkout = () => {
         userEmail: user.email,
         items: orderItems,
         totalAmount: selectedItemsTotal,
-        customerInfo,
+        customerInfo: {
+          name: customerInfo.name,
+          email: customerInfo.email,
+          phone: customerInfo.phone,
+          address: customerInfo.address,
+          city: customerInfo.city,
+          state: customerInfo.state,
+          zipCode: customerInfo.zipCode
+        },
         paymentMethod: 'UPI',
         paymentStatus: 'pending',
         orderStatus: 'processing',

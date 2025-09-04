@@ -1,7 +1,9 @@
 import mongoose from 'mongoose';
 
-// Use a direct fallback value instead of process.env to avoid "process is not defined" error
-const MONGODB_URI = 'mongodb://localhost:27017/herambha_dryfruits'; // Default fallback
+// Frontend should not directly connect to MongoDB in production
+// This is just a fallback for development
+// In production, all database operations should go through the API
+const MONGODB_URI = "mongodb://localhost:27017/herambha_dryfruits"; // Local fallback only
 
 if (!MONGODB_URI) {
   throw new Error('Please define the MONGODB_URI environment variable');
@@ -14,6 +16,10 @@ if (!cached) {
 }
 
 async function connectToDatabase() {
+  // In a proper frontend app, this function should not be used
+  // All database operations should go through the backend API
+  console.warn('⚠️  Frontend attempting direct database connection. This should only happen in development.');
+  
   if (cached.conn) {
     return cached.conn;
   }
@@ -25,10 +31,12 @@ async function connectToDatabase() {
 
     // Add error handling for the connection
     cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
+      console.log('✅ Frontend connected to local MongoDB (development only)');
       return mongoose;
     }).catch((error) => {
-      console.error('MongoDB connection error:', error);
-      throw error;
+      console.error('❌ Frontend failed to connect to local MongoDB:', error);
+      // Don't throw error - frontend should work even without direct DB access
+      return null;
     });
   }
 
@@ -36,7 +44,8 @@ async function connectToDatabase() {
     cached.conn = await cached.promise;
   } catch (e) {
     cached.promise = null;
-    throw e;
+    console.error('❌ Error in frontend MongoDB connection:', e);
+    return null;
   }
 
   return cached.conn;

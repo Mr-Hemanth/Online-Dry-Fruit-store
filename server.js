@@ -47,13 +47,15 @@ if (!MONGODB_URI) {
   process.exit(1);
 }
 
-// Connect to MongoDB
+console.log('🚀 Attempting to connect to MongoDB...');
+
+// Connect to MongoDB with minimal options
 mongoose.connect(MONGODB_URI)
   .then(() => {
-    console.log('Connected to MongoDB');
+    console.log('✅ Successfully connected to MongoDB');
   })
   .catch((error) => {
-    console.error('Failed to connect to MongoDB:', error);
+    console.error('❌ Failed to connect to MongoDB:', error.message);
     process.exit(1);
   });
 

@@ -24,7 +24,7 @@ import {
 } from '@chakra-ui/react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { Chrome, User, Lock } from 'lucide-react';
+import { User, Lock } from 'lucide-react';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -32,8 +32,8 @@ const Login = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState({});
-  const { signIn, signUp, signInWithGoogle } = useAuth();
+  const [errors, setErrors] = useState('');
+  const { signIn, signUp } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -106,30 +106,6 @@ const Login = () => {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    setLoading(true);
-    try {
-      await signInWithGoogle();
-      toast({
-        title: 'Signed in with Google',
-        status: 'success',
-        duration: 3000,
-        isClosable: true,
-      });
-      navigate('/');
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to sign in with Google',
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Handle input changes and clear errors
   const handleEmailChange = (e) => {
     setEmail(e.target.value);
@@ -171,24 +147,6 @@ const Login = () => {
           <Heading textAlign={'center'}>
             {isLogin ? 'Sign In' : 'Create Account'}
           </Heading>
-          
-          <Button
-            onClick={handleGoogleSignIn}
-            isLoading={loading}
-            leftIcon={<Chrome />}
-            w={'full'}
-            variant={'outline'}
-          >
-            Continue with Google
-          </Button>
-          
-          <HStack w={'full'}>
-            <Divider />
-            <Text fontSize={'sm'} color={'gray.500'} px={2}>
-              or
-            </Text>
-            <Divider />
-          </HStack>
           
           <Box w={'full'} p={6} borderWidth={1} borderRadius={'lg'}>
             <form onSubmit={handleSubmit}>

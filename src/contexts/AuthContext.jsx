@@ -26,9 +26,9 @@ export const AuthProvider = ({ children }) => {
       // Check if credentials match admin credentials (using direct values to avoid process is not defined error)
       const isAdmin = email === 'admin@admin.com' && password === 'admin123456';
       
-      // Create user object
+      // Create user object with consistent UID for admin
       const userData = {
-        uid: `user-${Date.now()}`,
+        uid: isAdmin ? 'admin-user' : `user-${Date.now()}`,
         email,
         displayName: email.split('@')[0],
         isAdmin
@@ -75,38 +75,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const signInWithGoogle = async () => {
-    setLoading(true);
-    try {
-      // In a real implementation, this would integrate with Google OAuth
-      // For now, we'll simulate a Google login with a mock user
-      
-      // Generate a unique ID for the Google user
-      const googleUserId = `google-${Date.now()}`;
-      
-      // Create user object with Google information
-      const userData = {
-        uid: googleUserId,
-        email: 'user@gmail.com', // This would be the actual Google email
-        displayName: 'Google User', // This would be the actual Google display name
-        isAdmin: false
-      };
-      
-      // Save user to MongoDB
-      const userDoc = await mongoAuthService.createUserDocument(userData);
-      
-      // Save user to localStorage
-      localStorage.setItem('user', JSON.stringify(userDoc));
-      
-      setUser(userDoc);
-      return { user: userDoc };
-    } catch (error) {
-      throw new Error(error.message || 'Failed to sign in with Google');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const signOut = async () => {
     setLoading(true);
     try {
@@ -126,7 +94,6 @@ export const AuthProvider = ({ children }) => {
     loading,
     signIn,
     signUp,
-    signInWithGoogle,
     signOut
   };
 
