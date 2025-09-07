@@ -1,13 +1,3 @@
-// Order status constants
-export const OrderStatus = {
-  PENDING: 'PENDING',
-  PAID: 'PAID',
-  SHIPPED: 'SHIPPED',
-  DELIVERED: 'DELIVERED',
-  REJECTED: 'REJECTED',
-  CANCELLED: 'CANCELLED'
-};
-
 // Default factory functions
 export const createProduct = (data = {}) => ({
   id: '',
@@ -63,7 +53,7 @@ export const createOrder = (data = {}) => ({
   subtotal: 0,
   shippingCharges: 0,
   total: 0,
-  status: OrderStatus.PENDING,
+  status: 'processing', // Use the actual backend status value
   paymentProof: null,
   upiPaymentLink: '',
   createdAt: new Date().toISOString(),

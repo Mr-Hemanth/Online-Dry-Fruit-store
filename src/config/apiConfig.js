@@ -9,7 +9,7 @@ const isDevelopment = window.location.hostname === 'localhost' ||
 // In development, use the same hostname as the frontend
 // In production, you'll need to set your actual API domain
 const API_BASE_URL = isDevelopment 
-  ? `http://${window.location.hostname}:3001/api`
-  : 'http://192.168.1.109:3001/api'; // Default to your server IP, but should be overridden in production
+  ? `http://${window.location.hostname}:3002/api`
+  : 'http://192.168.1.109:3002/api'; // Default to your server IP, but should be overridden in production
 
 export { API_BASE_URL };

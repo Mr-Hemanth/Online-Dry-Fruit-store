@@ -14,7 +14,13 @@ import {
   AlertIcon,
   AlertTitle,
   AlertDescription,
-  Flex
+  Flex,
+  Center,
+  Badge,
+  Divider,
+  Select,
+  FormControl,
+  FormLabel
 } from '@chakra-ui/react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ShoppingCart, ArrowLeft } from 'lucide-react';
@@ -28,9 +34,8 @@ const ProductDetail = () => {
   const { addToCart } = useCart();
   const toast = useToast();
   const [quantity, setQuantity] = useState(1);
-  const [selectedWeight, setSelectedWeight] = useState('');
+  const [selectedWeight, setSelectedWeight] = useState('1kg');
   const [product, setProduct] = useState(null);
-  const [productVariants, setProductVariants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -52,13 +57,8 @@ const ProductDetail = () => {
         }
         
         setProduct(productData);
-        
-        // Set default weight selection
-        setSelectedWeight(productData.id);
-        
-        // For variants, we'll set an empty array for now
-        // In a real implementation, you might fetch variants from the database
-        setProductVariants([]);
+        // Set default weight to 1kg
+        setSelectedWeight('1kg');
       } catch (err) {
         console.error('Error fetching product:', err);
         setError('Failed to load product details. Please try again later.');
@@ -69,6 +69,27 @@ const ProductDetail = () => {
 
     fetchProduct();
   }, [id]);
+
+  // Calculate price based on weight
+  const calculatePriceForWeight = (basePrice, selectedWeight, productBaseWeight) => {
+    // Convert product base weight to grams for calculation
+    const baseWeightInGrams = convertWeightToGrams(productBaseWeight);
+    const selectedWeightInGrams = convertWeightToGrams(selectedWeight);
+    
+    // Calculate price per gram and then for selected weight
+    const pricePerGram = basePrice / baseWeightInGrams;
+    return Math.round(pricePerGram * selectedWeightInGrams);
+  };
+
+  // Convert weight string to grams
+  const convertWeightToGrams = (weight) => {
+    if (weight.includes('kg')) {
+      return parseFloat(weight) * 1000;
+    } else if (weight.includes('g')) {
+      return parseFloat(weight);
+    }
+    return 1000; // default to 1kg
+  };
 
   const handleAddToCart = () => {
     if (!product) return;
@@ -84,10 +105,18 @@ const ProductDetail = () => {
       return;
     }
 
-    addToCart(product, quantity);
+    // Create a product variant based on selected weight
+    const productWithWeight = {
+      ...product,
+      weight: selectedWeight,
+      // Adjust price based on weight
+      price: calculatePriceForWeight(product.price, selectedWeight, product.weight)
+    };
+
+    addToCart(productWithWeight, quantity);
     toast({
       title: 'Added to Cart',
-      description: `${product.name} (${product.weight}) has been added to your cart.`,
+      description: `${product.name} (${selectedWeight}) has been added to your cart.`,
       status: 'success',
       duration: 3000,
       isClosable: true,
@@ -157,6 +186,9 @@ const ProductDetail = () => {
     );
   }
 
+  // Calculate current price based on selected weight
+  const currentPrice = calculatePriceForWeight(product.price, selectedWeight, product.weight);
+
   return (
     <Box py={8}>
       <Container maxW={'6xl'}>
@@ -220,10 +252,10 @@ const ProductDetail = () => {
               <VStack align={'stretch'} spacing={4}>
                 <HStack align={'center'}>
                   <Text fontSize={'2xl'} fontWeight={'bold'}>
-                    {formatCurrency(product.price)}
+                    {formatCurrency(currentPrice)}
                   </Text>
                   <Text color={'gray.500'}>
-                    / {product.weight}
+                    / {selectedWeight}
                   </Text>
                 </HStack>
 
@@ -243,35 +275,27 @@ const ProductDetail = () => {
                     Out of Stock
                   </Text>
                 )}
-                
-                {/* Quality indicators */}
-                <HStack spacing={2}>
-                  <Badge colorScheme="blue">
-                    Quantity: {product.weight}
-                  </Badge>
-                </HStack>
               </VStack>
 
               <Divider />
 
               <VStack align={'stretch'} spacing={4}>
-                {productVariants.length > 0 && (
-                  <VStack align={'stretch'}>
-                    <Text fontWeight={'medium'}>Other Variants:</Text>
-                    <Select 
-                      value={selectedWeight} 
-                      onChange={(e) => setSelectedWeight(e.target.value)}
-                    >
-                      <option value={product.id}>{product.weight} - {formatCurrency(product.price)}</option>
-                      {productVariants.map(variant => (
-                        <option key={variant.id} value={variant.id}>
-                          {variant.weight} - {formatCurrency(variant.price)}
-                        </option>
-                      ))}
-                    </Select>
-                  </VStack>
-                )}
-
+                {/* Weight Selection */}
+                <HStack>
+                  <Text fontWeight={'medium'}>Weight:</Text>
+                  <Select 
+                    value={selectedWeight} 
+                    onChange={(e) => setSelectedWeight(e.target.value)}
+                    maxW={'120px'}
+                    isDisabled={product.stock === 0}
+                  >
+                    <option value="250g">250g</option>
+                    <option value="500g">500g</option>
+                    <option value="1kg">1kg</option>
+                  </Select>
+                </HStack>
+                
+                {/* Quantity Selection */}
                 <HStack>
                   <Text fontWeight={'medium'}>Quantity:</Text>
                   <Select 

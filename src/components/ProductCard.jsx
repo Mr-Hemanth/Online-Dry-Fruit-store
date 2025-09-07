@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Center,
@@ -14,6 +14,9 @@ import {
   Flex,
   IconButton,
   Tooltip,
+  Select,
+  FormControl,
+  FormLabel,
 } from '@chakra-ui/react';
 import { Link as RouterLink } from 'react-router-dom';
 import { ShoppingCart, Heart, HeartOff } from 'lucide-react';
@@ -27,7 +30,18 @@ const ProductCard = ({ product, onRemoveFromWishlist, showRemoveFromWishlist = f
   const { addToWishlist, removeFromWishlist, isInWishlist } = useWishlist();
   const { user } = useAuth();
   const toast = useToast();
+  
+  // Initialize with 1kg if available, otherwise 500g
+  const [selectedWeight, setSelectedWeight] = useState('1kg');
+  const [quantity, setQuantity] = useState(1);
   const isInWish = isInWishlist(product.id);
+
+  // Set the default weight based on product availability
+  useEffect(() => {
+    // For this implementation, we're keeping it simple and always defaulting to 1kg
+    // In a more complex implementation, we would check what weights are available for the product
+    setSelectedWeight('1kg');
+  }, [product]);
 
   const handleAddToCart = (e) => {
     e.preventDefault(); // Prevent navigation when clicking the button
@@ -44,14 +58,46 @@ const ProductCard = ({ product, onRemoveFromWishlist, showRemoveFromWishlist = f
       return;
     }
 
-    addToCart(product, 1);
+    // Create a product variant based on selected weight
+    const productWithWeight = {
+      ...product,
+      weight: selectedWeight,
+      // Adjust price based on weight (assuming price is for 1kg)
+      price: calculatePriceForWeight(product.price, selectedWeight, product.weight)
+    };
+
+    addToCart(productWithWeight, quantity);
     toast({
       title: 'Added to Cart',
-      description: `${product.name} (${product.weight}) has been added to your cart.`,
+      description: `${product.name} (${selectedWeight}, Qty: ${quantity}) has been added to your cart.`,
       status: 'success',
       duration: 3000,
       isClosable: true,
     });
+    
+    // Reset quantity to 1 after adding to cart
+    setQuantity(1);
+  };
+
+  // Calculate price based on weight
+  const calculatePriceForWeight = (basePrice, selectedWeight, productBaseWeight) => {
+    // Convert product base weight to grams for calculation
+    const baseWeightInGrams = convertWeightToGrams(productBaseWeight);
+    const selectedWeightInGrams = convertWeightToGrams(selectedWeight);
+    
+    // Calculate price per gram and then for selected weight
+    const pricePerGram = basePrice / baseWeightInGrams;
+    return Math.round(pricePerGram * selectedWeightInGrams);
+  };
+
+  // Convert weight string to grams
+  const convertWeightToGrams = (weight) => {
+    if (weight.includes('kg')) {
+      return parseFloat(weight) * 1000;
+    } else if (weight.includes('g')) {
+      return parseFloat(weight);
+    }
+    return 1000; // default to 1kg
   };
 
   const handleToggleWishlist = async (e) => {
@@ -96,6 +142,9 @@ const ProductCard = ({ product, onRemoveFromWishlist, showRemoveFromWishlist = f
       }
     }
   };
+
+  // Weight options for selection
+  const weightOptions = ['250g', '500g', '1kg'];
 
   return (
     <Center py={{ base: 4, md: 6 }}>
@@ -202,67 +251,57 @@ const ProductCard = ({ product, onRemoveFromWishlist, showRemoveFromWishlist = f
             />
           </Tooltip>
         </Box>
-        
-        <Stack pt={{ base: 8, md: 10 }} align={'center'} spacing={{ base: 2, md: 3 }}>
-          <Text color={'gray.500'} fontSize={{ base: 'xs', sm: 'sm' }} textTransform={'uppercase'}>
-            {product.category}
-          </Text>
-          
-          <Heading fontSize={{ base: 'lg', sm: 'xl', md: '2xl' }} fontFamily={'body'} fontWeight={500} textAlign="center">
+
+        <Stack pt={10} align={'center'}>
+          <Heading fontSize={'lg'} fontFamily={'body'} fontWeight={500}>
             {product.name}
           </Heading>
-          
-          {/* Quantity information */}
-          <HStack spacing={2} justify="center">
-            <Badge colorScheme="blue" fontSize={{ base: '2xs', sm: 'xs' }}>
-              {product.weight}
-            </Badge>
-          </HStack>
-          
-          <Text color={'gray.600'} fontSize={{ base: 'xs', sm: 'sm' }} textAlign={'center'} noOfLines={2}>
-            {product.description}
+
+          <Text color={'gray.500'} fontSize={'sm'} textTransform={'uppercase'}>
+            {product.category}
           </Text>
-          
-          <HStack spacing={1}>
-            <Text fontSize={{ base: 'md', sm: 'lg' }} fontWeight={600}>
-              {formatCurrency(product.price)}
-            </Text>
-            {product.stock > 0 && product.stock < 10 && (
-              <Badge colorScheme="orange" fontSize="xs">
-                Only {product.stock} left
-              </Badge>
-            )}
-          </HStack>
-          
-          {/* Add to Cart button */}
-          {product.stock > 0 && (
+
+          <Text fontWeight={800} fontSize={'xl'} color={'primary.500'}>
+            {formatCurrency(product.price)} <Text as="span" fontSize="sm">/ {product.weight}</Text>
+          </Text>
+
+          {/* Weight selector and Quantity selector */}
+          <Stack direction={'row'} align={'center'} spacing={2} width="100%">
+            <FormControl width="35%">
+              <Select 
+                size="sm" 
+                value={selectedWeight}
+                onChange={(e) => setSelectedWeight(e.target.value)}
+              >
+                {weightOptions.map(weight => (
+                  <option key={weight} value={weight}>{weight}</option>
+                ))}
+              </Select>
+            </FormControl>
+            
+            <FormControl width="25%">
+              <Select 
+                size="sm" 
+                value={quantity}
+                onChange={(e) => setQuantity(parseInt(e.target.value))}
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
+                  <option key={num} value={num}>{num}</option>
+                ))}
+              </Select>
+            </FormControl>
+            
             <Button
-              leftIcon={<ShoppingCart size={16} />}
-              colorScheme="primary"
-              variant="solid"
               size="sm"
-              width="full"
-              mt={2}
+              flex={1}
+              colorScheme="primary"
+              leftIcon={<ShoppingCart size={16} />}
               onClick={handleAddToCart}
               isDisabled={product.stock === 0}
             >
-              Add to Cart
+              Add
             </Button>
-          )}
-          
-          {product.stock === 0 && (
-            <Button
-              leftIcon={<ShoppingCart size={16} />}
-              colorScheme="gray"
-              variant="outline"
-              size="sm"
-              width="full"
-              mt={2}
-              isDisabled
-            >
-              Out of Stock
-            </Button>
-          )}
+          </Stack>
         </Stack>
       </Box>
     </Center>

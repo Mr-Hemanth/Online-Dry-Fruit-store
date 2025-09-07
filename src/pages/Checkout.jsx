@@ -31,6 +31,7 @@ import {
   UnorderedList,
   ListItem,
   Select,
+  Badge,
 } from '@chakra-ui/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -73,6 +74,13 @@ const Checkout = () => {
   const [orderId, setOrderId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // State for auto-payment verification
+  const [autoVerifying, setAutoVerifying] = useState(false);
+
+  // State for payment method selection
+  const [paymentMethod, setPaymentMethod] = useState('phonepe'); // default to phonepe
+  const [customUpiId, setCustomUpiId] = useState('');
 
   // Filter cart items based on selected items
   const filteredCartItems = selectedItems.length > 0 
@@ -389,7 +397,7 @@ const Checkout = () => {
 
   // Copy UPI ID to clipboard
   const copyUpiId = () => {
-    const upiId = import.meta.env.VITE_STORE_UPI_ID || 'sri.jewellery9999-1@okaxis'; // Fallback value
+    const upiId = import.meta.env.VITE_STORE_UPI_ID || 'hemanthreddydwarampudi-1@okaxis'; // Fallback value
     navigator.clipboard.writeText(upiId);
     toast({
       title: 'UPI ID Copied',
@@ -463,9 +471,15 @@ const Checkout = () => {
       setOrderId(order.id);
       setOrderPlaced(true);
       
+      // Automatically open UPI payment app
+      initiateUpiPayment(order.id, selectedItemsTotal);
+      
+      // Start auto-verification
+      startAutoVerification(order.id);
+      
       toast({
         title: 'Order Placed',
-        description: 'Your order has been placed successfully. Please complete the payment.',
+        description: 'Your order has been placed successfully. Please complete the payment in your UPI app.',
         status: 'success',
         duration: 5000,
         isClosable: true,
@@ -478,7 +492,164 @@ const Checkout = () => {
     }
   };
 
-  // Verify payment
+  // Validate UPI ID format
+  const validateUpiId = (upiId) => {
+    // Basic UPI ID format validation
+    const upiRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$/;
+    return upiRegex.test(upiId);
+  };
+
+  // Automatically open UPI payment app based on selected method
+  const initiateUpiPayment = (orderId, amount) => {
+    const storeUpiId = import.meta.env.VITE_STORE_UPI_ID || 'sri.jewellery9999-1@okaxis';
+    const merchantName = import.meta.env.VITE_STORE_MERCHANT_NAME || 'Herambha Dryfruits';
+    
+    let upiId = storeUpiId;
+    let appName = '';
+    
+    // Determine UPI ID and app based on selected payment method
+    switch (paymentMethod) {
+      case 'phonepe':
+        // Use PhonePe specific UPI ID if available, otherwise use store UPI ID
+        upiId = import.meta.env.VITE_PHONEPE_UPI_ID || storeUpiId;
+        appName = 'PhonePe';
+        break;
+      case 'googlepay':
+        // Use Google Pay specific UPI ID if available, otherwise use store UPI ID
+        upiId = import.meta.env.VITE_GOOGLEPAY_UPI_ID || storeUpiId;
+        appName = 'Google Pay';
+        break;
+      case 'custom':
+        if (!customUpiId) {
+          toast({
+            title: 'Invalid UPI ID',
+            description: 'Please enter a valid UPI ID',
+            status: 'error',
+            duration: 3000,
+            isClosable: true,
+          });
+          return;
+        }
+        
+        if (!validateUpiId(customUpiId)) {
+          toast({
+            title: 'Invalid UPI ID Format',
+            description: 'Please enter a valid UPI ID in the format: username@bank',
+            status: 'error',
+            duration: 3000,
+            isClosable: true,
+          });
+          return;
+        }
+        
+        upiId = customUpiId;
+        appName = 'your UPI app';
+        break;
+      default:
+        appName = 'your UPI app';
+    }
+    
+    // Create UPI URI with proper encoding
+    const upiUri = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${amount}&tn=Order-${orderId}&cu=INR`;
+    
+    // Show notification about payment initiation
+    toast({
+      title: 'Payment Initiated',
+      description: `Opening ${appName} for payment of ₹${amount.toFixed(2)}. Please complete the transaction in the app.`,
+      status: 'info',
+      duration: 5000,
+      isClosable: true,
+    });
+    
+    // Try to open the UPI URI directly using different methods for better compatibility
+    try {
+      // Method 1: Direct window.open (most reliable)
+      const newWindow = window.open(upiUri, '_blank');
+      
+      // Method 2: If window.open fails, try creating an anchor element
+      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+        const link = document.createElement('a');
+        link.href = upiUri;
+        link.target = '_blank';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (error) {
+      // Method 3: Fallback - show instructions
+      console.log('UPI Link:', upiUri);
+    }
+    
+    // Always show instructions as a fallback
+    toast({
+      title: 'Complete Payment in ' + appName,
+      description: `If ${appName} didn't open automatically, you can manually complete the payment by copying the UPI link and pasting it in your preferred UPI app.`,
+      status: 'info',
+      duration: 10000,
+      isClosable: true,
+    });
+  };
+
+  // Start auto-verification of payment
+  const startAutoVerification = (orderId) => {
+    setAutoVerifying(true);
+    
+    // Check order status every 5 seconds for up to 5 minutes
+    const maxAttempts = 60; // 5 minutes (60 * 5 seconds)
+    let attempts = 0;
+    
+    const checkPaymentStatus = async () => {
+      if (attempts >= maxAttempts || paymentVerified) {
+        setAutoVerifying(false);
+        return;
+      }
+      
+      attempts++;
+      
+      try {
+        // Fetch order details to check payment status
+        const response = await fetch(`${API_BASE_URL}/orders/${orderId}`);
+        if (response.ok) {
+          const order = await response.json();
+          if (order.paymentStatus === 'completed') {
+            // Payment completed, update UI
+            setPaymentVerified(true);
+            clearCart();
+            
+            toast({
+              title: 'Payment Successful',
+              description: 'Your payment has been verified automatically!',
+              status: 'success',
+              duration: 5000,
+              isClosable: true,
+            });
+            
+            // Redirect to home page after 3 seconds
+            setTimeout(() => {
+              navigate('/');
+            }, 3000);
+            
+            setAutoVerifying(false);
+            return;
+          }
+        }
+        
+        // Removed the simulation code that was causing automatic payment verification
+        // In a real implementation, we would rely on actual UPI gateway integration
+      } catch (error) {
+        console.error('Error checking payment status:', error);
+      }
+      
+      // Schedule next check
+      setTimeout(checkPaymentStatus, 5000);
+    };
+    
+    // Start the first check after 5 seconds
+    setTimeout(checkPaymentStatus, 5000);
+  };
+
+  // Verify payment manually (fallback)
   const handleVerifyPayment = async () => {
     if (!validateUtrNumber()) {
       setError('Please enter a valid 12-digit UTR number');
@@ -507,6 +678,11 @@ const Checkout = () => {
         duration: 5000,
         isClosable: true,
       });
+      
+      // Redirect to home page after 3 seconds
+      setTimeout(() => {
+        navigate('/');
+      }, 3000);
     } catch (err) {
       console.error('Error verifying payment:', err);
       setError('Failed to verify payment. Please try again.');
@@ -520,8 +696,13 @@ const Checkout = () => {
     navigate('/orders');
   };
 
+  // Navigate to home page
+  const handleGoHome = () => {
+    navigate('/');
+  };
+
   // Get store UPI ID from environment variables or use fallback values
-  const storeUpiId = import.meta.env.VITE_STORE_UPI_ID || 'sri.jewellery9999-1@okaxis'; // Fallback value
+  const storeUpiId = import.meta.env.VITE_STORE_UPI_ID || 'hemanthreddydwarampudi-1@okaxis'; // Fallback value
 
   if (authLoading) {
     return (
@@ -583,57 +764,168 @@ const Checkout = () => {
             <Text mb={6}>
               Order ID: <strong>{orderId}</strong>
             </Text>
+            <Text mb={6} color="green.500" fontWeight="bold">
+              You will be redirected to the home page shortly...
+            </Text>
             <HStack spacing={4} justify="center">
-              <Button colorScheme="primary" onClick={handleViewOrders}>
-                View Orders
+              <Button colorScheme="primary" onClick={handleGoHome}>
+                Go to Home Now
               </Button>
-              <Button variant="outline" onClick={() => navigate('/products')}>
-                Continue Shopping
+              <Button variant="outline" onClick={handleViewOrders}>
+                View Orders
               </Button>
             </HStack>
           </Box>
         ) : orderPlaced ? (
-          // Payment verification screen
+          // Payment verification screen with multiple options
           <VStack spacing={6} align="stretch">
             <Alert status="info">
               <AlertIcon />
               <Box flex="1">
                 <AlertTitle>Order Placed Successfully!</AlertTitle>
                 <AlertDescription display="block">
-                  Please complete the payment using UPI to confirm your order.
+                  Please complete the payment using your preferred UPI method. We're automatically checking for payment confirmation.
                 </AlertDescription>
               </Box>
             </Alert>
 
             <Box borderWidth={1} borderRadius="lg" p={6}>
+              <Heading size="md" mb={4}>Payment Method</Heading>
+              
+              <VStack align="stretch" spacing={4}>
+                {/* PhonePe Option */}
+                <Box 
+                  borderWidth={paymentMethod === 'phonepe' ? 2 : 1} 
+                  borderRadius="lg" 
+                  p={4}
+                  borderColor={paymentMethod === 'phonepe' ? 'primary.500' : 'gray.200'}
+                  cursor="pointer"
+                  onClick={() => setPaymentMethod('phonepe')}
+                >
+                  <HStack>
+                    <Icon as={Phone} color="primary.500" />
+                    <Text fontWeight="bold">PhonePe</Text>
+                    {paymentMethod === 'phonepe' && (
+                      <Badge colorScheme="green" ml="auto">Selected</Badge>
+                    )}
+                  </HStack>
+                  <Text fontSize="sm" color="gray.500" mt={2}>
+                    Pay directly through PhonePe app
+                  </Text>
+                </Box>
+                
+                {/* Google Pay Option */}
+                <Box 
+                  borderWidth={paymentMethod === 'googlepay' ? 2 : 1} 
+                  borderRadius="lg" 
+                  p={4}
+                  borderColor={paymentMethod === 'googlepay' ? 'primary.500' : 'gray.200'}
+                  cursor="pointer"
+                  onClick={() => setPaymentMethod('googlepay')}
+                >
+                  <HStack>
+                    <Icon as={Mail} color="primary.500" />
+                    <Text fontWeight="bold">Google Pay</Text>
+                    {paymentMethod === 'googlepay' && (
+                      <Badge colorScheme="green" ml="auto">Selected</Badge>
+                    )}
+                  </HStack>
+                  <Text fontSize="sm" color="gray.500" mt={2}>
+                    Pay directly through Google Pay app
+                  </Text>
+                </Box>
+                
+                {/* Custom UPI ID Option */}
+                <Box 
+                  borderWidth={paymentMethod === 'custom' ? 2 : 1} 
+                  borderRadius="lg" 
+                  p={4}
+                  borderColor={paymentMethod === 'custom' ? 'primary.500' : 'gray.200'}
+                  cursor="pointer"
+                  onClick={() => setPaymentMethod('custom')}
+                >
+                  <HStack>
+                    <Icon as={MapPin} color="primary.500" />
+                    <Text fontWeight="bold">Custom UPI ID</Text>
+                    {paymentMethod === 'custom' && (
+                      <Badge colorScheme="green" ml="auto">Selected</Badge>
+                    )}
+                  </HStack>
+                  <Text fontSize="sm" color="gray.500" mt={2}>
+                    Enter your own UPI ID for payment
+                  </Text>
+                  
+                  {paymentMethod === 'custom' && (
+                    <FormControl mt={3} isRequired>
+                      <FormLabel>Enter your UPI ID</FormLabel>
+                      <Input
+                        placeholder="example@upi"
+                        value={customUpiId}
+                        onChange={(e) => setCustomUpiId(e.target.value)}
+                      />
+                      <Text fontSize="xs" color="gray.500" mt={1}>
+                        Format: username@bank or mobile@upi
+                      </Text>
+                    </FormControl>
+                  )}
+                </Box>
+                
+                {/* Pay Now Button */}
+                <Button
+                  colorScheme="primary"
+                  size="lg"
+                  onClick={() => {
+                    // Re-initiate payment with selected method
+                    initiateUpiPayment(orderId, selectedItemsTotal);
+                    // Restart auto-verification
+                    startAutoVerification(orderId);
+                  }}
+                  isDisabled={paymentMethod === 'custom' && !customUpiId}
+                >
+                  Pay Now ₹{selectedItemsTotal.toFixed(2)}
+                </Button>
+              </VStack>
+            </Box>
+
+            <Box borderWidth={1} borderRadius="lg" p={6}>
               <Heading size="md" mb={4}>Payment Instructions</Heading>
               <UnorderedList spacing={2} mb={4}>
-                <ListItem>Scan the QR code or use the UPI ID to make payment</ListItem>
-                <ListItem>Enter the exact amount: ₹{selectedItemsTotal.toFixed(2)}</ListItem>
-                <ListItem>After payment, you'll receive a UTR number</ListItem>
-                <ListItem>Enter the UTR number below to verify your payment</ListItem>
+                <ListItem>Click "Pay Now" to initiate payment with your selected method</ListItem>
+                <ListItem>Complete the payment in your UPI app</ListItem>
+                <ListItem>We'll automatically detect payment completion</ListItem>
+                {autoVerifying && (
+                  <ListItem>
+                    <Text color="green.500">
+                      We're automatically checking for payment confirmation...
+                    </Text>
+                  </ListItem>
+                )}
               </UnorderedList>
               
               <Flex direction={{ base: 'column', md: 'row' }} gap={6} align="center">
-                <Box>
+                <Box textAlign="center">
                   {/* Dynamic QR Code with UPI ID and amount */}
                   <QRCodeSVG
                     value={`upi://pay?pa=${storeUpiId}&pn=${encodeURIComponent(import.meta.env.VITE_STORE_MERCHANT_NAME || 'Herambha Dryfruits')}&am=${selectedItemsTotal}&cu=INR`}
-                    size={200}
+                    size={{ base: 150, md: 200 }}
                     level={'H'}
                     includeMargin={true}
                   />
+                  <Text fontSize="sm" mt={2} color="gray.500">
+                    Scan QR code with any UPI app
+                  </Text>
                 </Box>
                 
-                <VStack align="stretch" spacing={4}>
+                <VStack align="stretch" spacing={4} flex={1}>
                   <Box>
-                    <Text fontWeight="bold" mb={2}>UPI ID:</Text>
-                    <HStack>
-                      <Text>{storeUpiId}</Text>
+                    <Text fontWeight="bold" mb={2}>Store UPI ID:</Text>
+                    <HStack flexWrap="wrap">
+                      <Text fontSize={{ base: 'sm', md: 'md' }} wordBreak="break-all">{storeUpiId}</Text>
                       <Button 
                         size="sm" 
                         leftIcon={<Copy size={16} />} 
                         onClick={copyUpiId}
+                        flexShrink={0}
                       >
                         Copy
                       </Button>
@@ -642,15 +934,28 @@ const Checkout = () => {
                   
                   <Box>
                     <Text fontWeight="bold" mb={2}>Amount to Pay:</Text>
-                    <Text fontSize="2xl" color="primary.500">₹{selectedItemsTotal.toFixed(2)}</Text>
+                    <Text fontSize={{ base: 'xl', md: '2xl' }} color="primary.500">₹{selectedItemsTotal.toFixed(2)}</Text>
                   </Box>
+                  
+                  {autoVerifying && (
+                    <Box>
+                      <Text fontWeight="bold" mb={2}>Auto-Verification:</Text>
+                      <HStack>
+                        <Spinner size="sm" />
+                        <Text fontSize="sm">Checking for payment confirmation...</Text>
+                      </HStack>
+                    </Box>
+                  )}
                 </VStack>
               </Flex>
 
             </Box>
 
             <Box borderWidth={1} borderRadius="lg" p={6}>
-              <Heading size="md" mb={4}>Verify Payment</Heading>
+              <Heading size="md" mb={4}>Manual Payment Verification</Heading>
+              <Text mb={4}>
+                If auto-verification doesn't work, you can manually verify your payment by entering the UTR number below.
+              </Text>
               <FormControl isRequired isInvalid={!!errors.utrNumber}>
                 <FormLabel>UTR Number</FormLabel>
                 <Input
@@ -675,7 +980,7 @@ const Checkout = () => {
                 size="lg"
                 width="full"
               >
-                Verify Payment
+                Verify Payment Manually
               </Button>
             </Box>
           </VStack>
@@ -707,17 +1012,29 @@ const Checkout = () => {
               )}
               
               <VStack spacing={4} align="stretch">
-                <HStack spacing={4}>
+                <VStack spacing={4} align="stretch">
                   <FormControl isRequired isInvalid={!!errors.name}>
                     <FormLabel>Full Name</FormLabel>
                     <Input
                       name="name"
                       value={customerInfo.name}
                       onChange={handleInputChange}
-                      placeholder="Enter your full name"
                     />
                     {errors.name && (
                       <Text color="red.500" fontSize="sm" mt={1}>{errors.name}</Text>
+                    )}
+                  </FormControl>
+                  
+                  <FormControl isRequired isInvalid={!!errors.email}>
+                    <FormLabel>Email</FormLabel>
+                    <Input
+                      name="email"
+                      type="email"
+                      value={customerInfo.email}
+                      onChange={handleInputChange}
+                    />
+                    {errors.email && (
+                      <Text color="red.500" fontSize="sm" mt={1}>{errors.email}</Text>
                     )}
                   </FormControl>
                   
@@ -725,31 +1042,16 @@ const Checkout = () => {
                     <FormLabel>Phone Number</FormLabel>
                     <Input
                       name="phone"
+                      type="tel"
                       value={customerInfo.phone}
                       onChange={handleInputChange}
-                      placeholder="Enter your phone number"
-                      type="tel"
                       maxLength={10}
                     />
                     {errors.phone && (
                       <Text color="red.500" fontSize="sm" mt={1}>{errors.phone}</Text>
                     )}
                   </FormControl>
-                </HStack>
-                
-                <FormControl isRequired isInvalid={!!errors.email}>
-                  <FormLabel>Email Address</FormLabel>
-                  <Input
-                    name="email"
-                    value={customerInfo.email}
-                    onChange={handleInputChange}
-                    placeholder="Enter your email address"
-                    type="email"
-                  />
-                  {errors.email && (
-                    <Text color="red.500" fontSize="sm" mt={1}>{errors.email}</Text>
-                  )}
-                </FormControl>
+                </VStack>
                 
                 <FormControl isRequired isInvalid={!!errors.address}>
                   <FormLabel>Address</FormLabel>
@@ -757,21 +1059,19 @@ const Checkout = () => {
                     name="address"
                     value={customerInfo.address}
                     onChange={handleInputChange}
-                    placeholder="Enter your full address"
                   />
                   {errors.address && (
                     <Text color="red.500" fontSize="sm" mt={1}>{errors.address}</Text>
                   )}
                 </FormControl>
                 
-                <HStack spacing={4}>
+                <HStack spacing={4} flexDirection={{ base: 'column', md: 'row' }} align="stretch">
                   <FormControl isRequired isInvalid={!!errors.city}>
                     <FormLabel>City</FormLabel>
                     <Input
                       name="city"
                       value={customerInfo.city}
                       onChange={handleInputChange}
-                      placeholder="Enter your city"
                     />
                     {errors.city && (
                       <Text color="red.500" fontSize="sm" mt={1}>{errors.city}</Text>
@@ -784,7 +1084,6 @@ const Checkout = () => {
                       name="state"
                       value={customerInfo.state}
                       onChange={handleInputChange}
-                      placeholder="Enter your state"
                     />
                     {errors.state && (
                       <Text color="red.500" fontSize="sm" mt={1}>{errors.state}</Text>
@@ -797,7 +1096,6 @@ const Checkout = () => {
                       name="zipCode"
                       value={customerInfo.zipCode}
                       onChange={handleInputChange}
-                      placeholder="Enter ZIP code"
                       maxLength={6}
                     />
                     {errors.zipCode && (
@@ -806,13 +1104,13 @@ const Checkout = () => {
                   </FormControl>
                 </HStack>
               </VStack>
-            </Box>
-
-            <Box borderWidth={1} borderRadius="lg" p={6}>
+              
+              <Divider my={6} />
+              
               <Heading size="md" mb={4}>Order Summary</Heading>
-              <VStack spacing={4} align="stretch">
+              <VStack align="stretch" spacing={3} mb={6}>
                 {filteredCartItems.map((item) => (
-                  <HStack key={item.productId} justify="space-between">
+                  <HStack key={item.product.id} justify="space-between">
                     <Text>{item.product.name} × {item.quantity}</Text>
                     <Text>₹{(item.product.price * item.quantity).toFixed(2)}</Text>
                   </HStack>
@@ -823,41 +1121,17 @@ const Checkout = () => {
                   <Text>₹{selectedItemsTotal.toFixed(2)}</Text>
                 </HStack>
               </VStack>
+              
+              <Button
+                colorScheme="primary"
+                size="lg"
+                onClick={handlePlaceOrder}
+                isLoading={loading}
+                width="full"
+              >
+                Place Order
+              </Button>
             </Box>
-
-            <Accordion allowToggle>
-              <AccordionItem>
-                <AccordionButton>
-                  <Box flex="1" textAlign="left">
-                    <Text fontWeight="bold">UPI Payment Instructions</Text>
-                  </Box>
-                  <AccordionIcon />
-                </AccordionButton>
-                <AccordionPanel pb={4}>
-                  <UnorderedList spacing={2}>
-                    <ListItem>After placing your order, you'll see a QR code and UPI ID</ListItem>
-                    <ListItem>Scan the QR code or use the UPI ID ({storeUpiId}) to make payment</ListItem>
-                    <ListItem>Enter the exact amount shown in your order</ListItem>
-                    <ListItem>Save the transaction for the UTR number</ListItem>
-                    <ListItem>Enter the UTR number to verify your payment</ListItem>
-                  </UnorderedList>
-                </AccordionPanel>
-              </AccordionItem>
-            </Accordion>
-
-            <Checkbox isRequired mb={4}>
-              I agree to the terms and conditions and confirm that my shipping information is correct.
-            </Checkbox>
-
-            <Button
-              colorScheme="primary"
-              onClick={handlePlaceOrder}
-              isLoading={loading}
-              size="lg"
-              width="full"
-            >
-              Place Order
-            </Button>
           </VStack>
         )}
       </Container>
