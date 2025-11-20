@@ -731,6 +731,100 @@ app.put('/api/orders/:id/payment', async (req, res) => {
   }
 });
 
+// Import Cashfree
+import crypto from 'crypto';
+
+// Create Cashfree order
+app.post('/api/create-cashfree-order', async (req, res) => {
+  try {
+    const { amount, orderId, customerInfo } = req.body;
+    
+    // Create Cashfree order
+    const order = {
+      order_id: `order_${orderId}`,
+      order_amount: parseFloat(amount).toFixed(2),
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: customerInfo.email,
+        customer_email: customerInfo.email,
+        customer_phone: customerInfo.phone,
+        customer_name: customerInfo.name,
+      },
+      order_meta: {
+        return_url: `http://localhost:5173/payment-success?order_id={order_id}`,
+        notify_url: `http://localhost:3002/api/cashfree-webhook`,
+      },
+    };
+
+    res.json({
+      order_id: order.order_id,
+      order_amount: order.order_amount,
+      order_currency: order.order_currency,
+      customer_details: order.customer_details
+    });
+  } catch (error) {
+    console.error('Error creating Cashfree order:', error);
+    res.status(500).json({ error: 'Failed to create payment order' });
+  }
+});
+
+// Verify Cashfree payment
+app.post('/api/verify-cashfree-payment', async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    
+    // In a real implementation, you would verify the payment with Cashfree's API
+    // This is a placeholder for the actual verification logic
+    
+    // Update order status in database
+    const updatedOrder = await Order.findByIdAndUpdate(
+      orderId,
+      { 
+        paymentStatus: 'completed',
+        paymentMethod: 'Cashfree',
+        utrNumber: `cashfree_${Date.now()}`
+      },
+      { new: true }
+    );
+    
+    if (!updatedOrder) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Order not found' 
+      });
+    }
+    
+    res.json({ 
+      success: true,
+      message: 'Payment verified successfully',
+      order: updatedOrder
+    });
+  } catch (error) {
+    console.error('Error verifying Cashfree payment:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to verify payment' 
+    });
+  }
+});
+
+// Cashfree webhook endpoint
+app.post('/api/cashfree-webhook', async (req, res) => {
+  try {
+    // Handle Cashfree webhook
+    // This is where Cashfree will send payment notifications
+    console.log('Cashfree webhook received:', req.body);
+    
+    // Process the webhook data
+    // Update order status accordingly
+    
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Error processing Cashfree webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
+  }
+});
+
 // Start the server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);

@@ -32,6 +32,13 @@ import {
   ListItem,
   Select,
   Badge,
+  Radio,
+  RadioGroup,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
 } from '@chakra-ui/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -40,6 +47,37 @@ import { mongoOrderService as orderService } from '../services/mongoOrderService
 import { API_BASE_URL } from '../config/apiConfig';
 import { Phone, Mail, MapPin, Copy, CheckCircle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { generateUPILink } from '../utils/constants';
+
+// Add script for Cashfree
+const loadCashfreeScript = () => {
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://sdk.cashfree.com/js/ui/1.0.26/cashfree.sandbox.js';
+    script.onload = () => {
+      resolve(true);
+    };
+    script.onerror = () => {
+      resolve(false);
+    };
+    document.body.appendChild(script);
+  });
+};
+
+// Add script for Razorpay
+const loadRazorpayScript = () => {
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => {
+      resolve(true);
+    };
+    script.onerror = () => {
+      resolve(false);
+    };
+    document.body.appendChild(script);
+  });
+};
 
 const Checkout = () => {
   const location = useLocation();
@@ -67,20 +105,18 @@ const Checkout = () => {
   // Validation errors state
   const [errors, setErrors] = useState({});
 
-  // UPI payment state
-  const [utrNumber, setUtrNumber] = useState('');
+  // Payment state
   const [paymentVerified, setPaymentVerified] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [orderId, setOrderId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // State for auto-payment verification
-  const [autoVerifying, setAutoVerifying] = useState(false);
-
-  // State for payment method selection
-  const [paymentMethod, setPaymentMethod] = useState('phonepe'); // default to phonepe
-  const [customUpiId, setCustomUpiId] = useState('');
+  // State for payment processing
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+  
+  // Payment method selection
+  const [paymentMethod, setPaymentMethod] = useState('cashfree'); // 'cashfree', 'phonepe', 'googlepay', 'paytm'
 
   // Filter cart items based on selected items
   const filteredCartItems = selectedItems.length > 0 
@@ -155,7 +191,7 @@ const Checkout = () => {
     }
     
     // Email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
     if (!customerInfo.email || !emailRegex.test(customerInfo.email)) {
       newErrors.email = 'Please enter a valid email address';
     }
@@ -230,34 +266,6 @@ const Checkout = () => {
     }
   };
 
-  // Handle UTR input change
-  const handleUtrChange = (e) => {
-    const value = e.target.value.replace(/\D/g, '').slice(0, 12); // Only allow digits, max 12
-    setUtrNumber(value);
-    
-    // Clear error when user starts typing
-    if (errors.utrNumber) {
-      setErrors(prev => {
-        const newErrors = { ...prev };
-        delete newErrors.utrNumber;
-        return newErrors;
-      });
-    }
-  };
-
-  // Validate UTR number
-  const validateUtrNumber = () => {
-    // UTR numbers are typically 12 digits
-    if (!utrNumber || utrNumber.length !== 12 || !/^\d+$/.test(utrNumber)) {
-      setErrors(prev => ({
-        ...prev,
-        utrNumber: 'Please enter a valid 12-digit UTR number'
-      }));
-      return false;
-    }
-    return true;
-  };
-
   // Check if address already exists in user's address book
   const isAddressNew = () => {
     // If no user or no saved addresses, it's definitely new
@@ -325,7 +333,7 @@ const Checkout = () => {
     }
     
     if (isAddressNew()) {
-      console.log('Saving new address to user\'s address book');
+      console.log("Saving new address to user's address book");
       
       try {
         // Parse address lines (assume addressLine1 is everything before first comma, rest is addressLine2)
@@ -395,19 +403,6 @@ const Checkout = () => {
     return false; // Return false to indicate address was not new (so not saved)
   };
 
-  // Copy UPI ID to clipboard
-  const copyUpiId = () => {
-    const upiId = import.meta.env.VITE_STORE_UPI_ID || 'hemanthreddydwarampudi-1@okaxis'; // Fallback value
-    navigator.clipboard.writeText(upiId);
-    toast({
-      title: 'UPI ID Copied',
-      description: `Copied ${upiId} to clipboard`,
-      status: 'success',
-      duration: 3000,
-      isClosable: true,
-    });
-  };
-
   // Place order
   const handlePlaceOrder = async () => {
     if (!validateCustomerInfo()) {
@@ -428,7 +423,7 @@ const Checkout = () => {
       // Check if this is a new address and save it to the user's address book
       const addressSaved = await saveAddressIfNew();
       if (addressSaved) {
-        console.log('New address saved to user\'s address book');
+        console.log("New address saved to user's address book");
       }
       
       // Transform filtered cart items to match Order model requirements
@@ -456,7 +451,10 @@ const Checkout = () => {
           state: customerInfo.state,
           zipCode: customerInfo.zipCode
         },
-        paymentMethod: 'UPI',
+        paymentMethod: paymentMethod === 'cashfree' ? 'Cashfree' : 
+                      paymentMethod === 'phonepe' ? 'PhonePe' :
+                      paymentMethod === 'googlepay' ? 'Google Pay' :
+                      paymentMethod === 'paytm' ? 'Paytm' : 'Unknown',
         paymentStatus: 'pending',
         orderStatus: 'processing',
         utrNumber: null,
@@ -471,17 +469,11 @@ const Checkout = () => {
       setOrderId(order.id);
       setOrderPlaced(true);
       
-      // Automatically open UPI payment app
-      initiateUpiPayment(order.id, selectedItemsTotal);
-      
-      // Start auto-verification
-      startAutoVerification(order.id);
-      
       toast({
         title: 'Order Placed',
-        description: 'Your order has been placed successfully. Please complete the payment in your UPI app.',
+        description: 'Your order has been placed successfully.',
         status: 'success',
-        duration: 5000,
+        duration: 3000,
         isClosable: true,
       });
     } catch (err) {
@@ -492,134 +484,103 @@ const Checkout = () => {
     }
   };
 
-  // Validate UPI ID format
-  const validateUpiId = (upiId) => {
-    // Basic UPI ID format validation
-    const upiRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$/;
-    return upiRegex.test(upiId);
-  };
-
-  // Automatically open UPI payment app based on selected method
-  const initiateUpiPayment = (orderId, amount) => {
-    const storeUpiId = import.meta.env.VITE_STORE_UPI_ID || 'sri.jewellery9999-1@okaxis';
-    const merchantName = import.meta.env.VITE_STORE_MERCHANT_NAME || 'Herambha Dryfruits';
-    
-    let upiId = storeUpiId;
-    let appName = '';
-    
-    // Determine UPI ID and app based on selected payment method
-    switch (paymentMethod) {
-      case 'phonepe':
-        // Use PhonePe specific UPI ID if available, otherwise use store UPI ID
-        upiId = import.meta.env.VITE_PHONEPE_UPI_ID || storeUpiId;
-        appName = 'PhonePe';
-        break;
-      case 'googlepay':
-        // Use Google Pay specific UPI ID if available, otherwise use store UPI ID
-        upiId = import.meta.env.VITE_GOOGLEPAY_UPI_ID || storeUpiId;
-        appName = 'Google Pay';
-        break;
-      case 'custom':
-        if (!customUpiId) {
-          toast({
-            title: 'Invalid UPI ID',
-            description: 'Please enter a valid UPI ID',
-            status: 'error',
-            duration: 3000,
-            isClosable: true,
-          });
-          return;
-        }
-        
-        if (!validateUpiId(customUpiId)) {
-          toast({
-            title: 'Invalid UPI ID Format',
-            description: 'Please enter a valid UPI ID in the format: username@bank',
-            status: 'error',
-            duration: 3000,
-            isClosable: true,
-          });
-          return;
-        }
-        
-        upiId = customUpiId;
-        appName = 'your UPI app';
-        break;
-      default:
-        appName = 'your UPI app';
+  // Process UPI payment
+  const processUPIPayment = () => {
+    if (!orderId) {
+      setError('Order not found');
+      return;
     }
-    
-    // Create UPI URI with proper encoding
-    const upiUri = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${amount}&tn=Order-${orderId}&cu=INR`;
-    
-    // Show notification about payment initiation
-    toast({
-      title: 'Payment Initiated',
-      description: `Opening ${appName} for payment of ₹${amount.toFixed(2)}. Please complete the transaction in the app.`,
-      status: 'info',
-      duration: 5000,
-      isClosable: true,
-    });
-    
-    // Try to open the UPI URI directly using different methods for better compatibility
+
+    setPaymentProcessing(true);
+    setError('');
+
     try {
-      // Method 1: Direct window.open (most reliable)
-      const newWindow = window.open(upiUri, '_blank');
-      
-      // Method 2: If window.open fails, try creating an anchor element
-      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-        const link = document.createElement('a');
-        link.href = upiUri;
-        link.target = '_blank';
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+      // Get the appropriate UPI ID based on selected payment method
+      let upiId;
+      switch (paymentMethod) {
+        case 'phonepe':
+          upiId = import.meta.env.VITE_PHONEPE_UPI_ID || import.meta.env.VITE_STORE_UPI_ID;
+          break;
+        case 'googlepay':
+          upiId = import.meta.env.VITE_GOOGLEPAY_UPI_ID || import.meta.env.VITE_STORE_UPI_ID;
+          break;
+        case 'paytm':
+          upiId = import.meta.env.VITE_PAYTM_UPI_ID || import.meta.env.VITE_STORE_UPI_ID;
+          break;
+        default:
+          upiId = import.meta.env.VITE_STORE_UPI_ID;
       }
-    } catch (error) {
-      // Method 3: Fallback - show instructions
-      console.log('UPI Link:', upiUri);
+
+      // Generate UPI payment link
+      const upiLink = generateUPILink(
+        upiId,
+        import.meta.env.VITE_STORE_MERCHANT_NAME || 'Herambha Dryfruits',
+        selectedItemsTotal,
+        orderId
+      );
+
+      // Open the UPI app
+      window.open(upiLink, '_blank');
+
+      // Show instructions to user
+      toast({
+        title: 'Payment Initiated',
+        description: `Please complete the payment in the ${paymentMethod === 'phonepe' ? 'PhonePe' : paymentMethod === 'googlepay' ? 'Google Pay' : 'Paytm'} app. You will be redirected automatically after payment.`,
+        status: 'info',
+        duration: null, // Keep it open until user acts
+        isClosable: true,
+      });
+
+      // Start polling for payment verification
+      startPaymentVerificationPolling();
+    } catch (err) {
+      console.error('Error processing UPI payment:', err);
+      setError('Failed to initiate UPI payment. Please try again.');
+      toast({
+        title: 'Payment Failed',
+        description: err.message || 'There was an issue initiating your payment. Please try again.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setPaymentProcessing(false);
     }
-    
-    // Always show instructions as a fallback
-    toast({
-      title: 'Complete Payment in ' + appName,
-      description: `If ${appName} didn't open automatically, you can manually complete the payment by copying the UPI link and pasting it in your preferred UPI app.`,
-      status: 'info',
-      duration: 10000,
-      isClosable: true,
-    });
   };
 
-  // Start auto-verification of payment
-  const startAutoVerification = (orderId) => {
-    setAutoVerifying(true);
-    
-    // Check order status every 5 seconds for up to 5 minutes
-    const maxAttempts = 60; // 5 minutes (60 * 5 seconds)
+  // Poll for payment verification
+  const startPaymentVerificationPolling = () => {
     let attempts = 0;
-    
-    const checkPaymentStatus = async () => {
-      if (attempts >= maxAttempts || paymentVerified) {
-        setAutoVerifying(false);
+    const maxAttempts = 60; // 5 minutes (5 seconds interval)
+    const pollInterval = 5000; // 5 seconds
+
+    const poll = async () => {
+      if (attempts >= maxAttempts) {
+        // Stop polling after max attempts
+        toast.closeAll();
+        toast({
+          title: 'Payment Verification Timeout',
+          description: "We couldn't automatically verify your payment. Please enter the UTR number manually.",
+          status: 'warning',
+          duration: null,
+          isClosable: true,
+        });
         return;
       }
-      
-      attempts++;
-      
+
       try {
-        // Fetch order details to check payment status
         const response = await fetch(`${API_BASE_URL}/orders/${orderId}`);
         if (response.ok) {
           const order = await response.json();
           if (order.paymentStatus === 'completed') {
-            // Payment completed, update UI
+            // Payment successful
             setPaymentVerified(true);
             clearCart();
             
+            toast.closeAll();
             toast({
               title: 'Payment Successful',
-              description: 'Your payment has been verified automatically!',
+              description: 'Your payment has been verified successfully!',
               status: 'success',
               duration: 5000,
               isClosable: true,
@@ -629,65 +590,138 @@ const Checkout = () => {
             setTimeout(() => {
               navigate('/');
             }, 3000);
-            
-            setAutoVerifying(false);
             return;
           }
         }
-        
-        // Removed the simulation code that was causing automatic payment verification
-        // In a real implementation, we would rely on actual UPI gateway integration
-      } catch (error) {
-        console.error('Error checking payment status:', error);
+      } catch (err) {
+        console.error('Error checking payment status:', err);
       }
-      
-      // Schedule next check
-      setTimeout(checkPaymentStatus, 5000);
+
+      attempts++;
+      setTimeout(poll, pollInterval);
     };
-    
-    // Start the first check after 5 seconds
-    setTimeout(checkPaymentStatus, 5000);
+
+    // Start polling
+    poll();
   };
 
-  // Verify payment manually (fallback)
-  const handleVerifyPayment = async () => {
-    if (!validateUtrNumber()) {
-      setError('Please enter a valid 12-digit UTR number');
-      return;
-    }
-
+  // Process payment with Cashfree
+  const processCashfreePayment = async () => {
     if (!orderId) {
       setError('Order not found');
       return;
     }
 
-    setLoading(true);
+    setPaymentProcessing(true);
     setError('');
 
     try {
-      // Update order with UTR number and payment status
-      await orderService.updatePaymentStatus(orderId, 'completed', utrNumber);
+      // Load Cashfree script
+      const isScriptLoaded = await loadCashfreeScript();
+      if (!isScriptLoaded) {
+        throw new Error('Failed to load Cashfree payment gateway');
+      }
+
+      // Create order on backend
+      const orderResponse = await fetch(`${API_BASE_URL}/create-cashfree-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: selectedItemsTotal,
+          orderId: orderId,
+          customerInfo: customerInfo
+        }),
+      });
+
+      if (!orderResponse.ok) {
+        throw new Error('Failed to create payment order');
+      }
+
+      const cashfreeOrder = await orderResponse.json();
+
+      // Configure Cashfree options
+      const paymentOptions = {
+        orderID: cashfreeOrder.order_id,
+        environment: import.meta.env.VITE_CASHFREE_ENVIRONMENT || 'SANDBOX',
+      };
+
+      // Open Cashfree payment modal
+      const cashfree = new window.Cashfree(paymentOptions);
+      cashfree.redirect();
       
-      setPaymentVerified(true);
-      clearCart(); // Clear cart after successful payment
-      
+      // For demonstration purposes, we'll simulate payment verification
+      // In a real implementation, this would be handled by webhooks
+      setTimeout(async () => {
+        try {
+          const verifyResponse = await fetch(`${API_BASE_URL}/verify-cashfree-payment`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              orderId: orderId
+            }),
+          });
+
+          if (verifyResponse.ok) {
+            const result = await verifyResponse.json();
+            if (result.success) {
+              // Payment successful
+              setPaymentVerified(true);
+              clearCart();
+              
+              toast({
+                title: 'Payment Successful',
+                description: 'Your payment has been verified successfully!',
+                status: 'success',
+                duration: 5000,
+                isClosable: true,
+              });
+              
+              // Redirect to home page after 3 seconds
+              setTimeout(() => {
+                navigate('/');
+              }, 3000);
+            } else {
+              throw new Error('Payment verification failed');
+            }
+          } else {
+            throw new Error('Failed to verify payment');
+          }
+        } catch (err) {
+          console.error('Error verifying payment:', err);
+          toast({
+            title: 'Payment Verification Failed',
+            description: 'There was an issue verifying your payment. Please contact support.',
+            status: 'error',
+            duration: 5000,
+            isClosable: true,
+          });
+        }
+      }, 3000);
+    } catch (err) {
+      console.error('Error processing payment:', err);
+      setError('Failed to process payment. Please try again.');
       toast({
-        title: 'Payment Verified',
-        description: 'Your payment has been verified successfully!',
-        status: 'success',
+        title: 'Payment Failed',
+        description: err.message || 'There was an issue processing your payment. Please try again.',
+        status: 'error',
         duration: 5000,
         isClosable: true,
       });
-      
-      // Redirect to home page after 3 seconds
-      setTimeout(() => {
-        navigate('/');
-      }, 3000);
-    } catch (err) {
-      console.error('Error verifying payment:', err);
-      setError('Failed to verify payment. Please try again.');
     } finally {
-      setLoading(false);
+      setPaymentProcessing(false);
+    }
+  };
+
+  // Handle payment submission based on selected method
+  const handlePaymentSubmit = () => {
+    if (paymentMethod === 'cashfree') {
+      processCashfreePayment();
+    } else {
+      processUPIPayment();
     }
   };
 
@@ -700,9 +734,6 @@ const Checkout = () => {
   const handleGoHome = () => {
     navigate('/');
   };
-
-  // Get store UPI ID from environment variables or use fallback values
-  const storeUpiId = import.meta.env.VITE_STORE_UPI_ID || 'hemanthreddydwarampudi-1@okaxis'; // Fallback value
 
   if (authLoading) {
     return (
@@ -777,217 +808,84 @@ const Checkout = () => {
             </HStack>
           </Box>
         ) : orderPlaced ? (
-          // Payment verification screen with multiple options
+          // Payment processing screen
           <VStack spacing={6} align="stretch">
             <Alert status="info">
               <AlertIcon />
               <Box flex="1">
                 <AlertTitle>Order Placed Successfully!</AlertTitle>
                 <AlertDescription display="block">
-                  Please complete the payment using your preferred UPI method. We're automatically checking for payment confirmation.
+                  Please complete the payment using your selected payment method.
                 </AlertDescription>
               </Box>
             </Alert>
 
-            <Box borderWidth={1} borderRadius="lg" p={6}>
-              <Heading size="md" mb={4}>Payment Method</Heading>
+            <Box borderWidth={1} borderRadius="lg" p={{ base: 4, md: 6 }}>
+              <Heading size="md" mb={4}>Payment Summary</Heading>
               
               <VStack align="stretch" spacing={4}>
-                {/* PhonePe Option */}
-                <Box 
-                  borderWidth={paymentMethod === 'phonepe' ? 2 : 1} 
-                  borderRadius="lg" 
-                  p={4}
-                  borderColor={paymentMethod === 'phonepe' ? 'primary.500' : 'gray.200'}
-                  cursor="pointer"
-                  onClick={() => setPaymentMethod('phonepe')}
-                >
-                  <HStack>
-                    <Icon as={Phone} color="primary.500" />
-                    <Text fontWeight="bold">PhonePe</Text>
-                    {paymentMethod === 'phonepe' && (
-                      <Badge colorScheme="green" ml="auto">Selected</Badge>
-                    )}
-                  </HStack>
-                  <Text fontSize="sm" color="gray.500" mt={2}>
-                    Pay directly through PhonePe app
+                <Box>
+                  <Text fontWeight="bold" mb={2}>Order ID:</Text>
+                  <Text>{orderId}</Text>
+                </Box>
+                
+                <Box>
+                  <Text fontWeight="bold" mb={2}>Amount to Pay:</Text>
+                  <Text fontSize={{ base: 'xl', md: '2xl' }} color="primary.500">
+                    ₹{selectedItemsTotal.toFixed(2)}
                   </Text>
                 </Box>
                 
-                {/* Google Pay Option */}
-                <Box 
-                  borderWidth={paymentMethod === 'googlepay' ? 2 : 1} 
-                  borderRadius="lg" 
-                  p={4}
-                  borderColor={paymentMethod === 'googlepay' ? 'primary.500' : 'gray.200'}
-                  cursor="pointer"
-                  onClick={() => setPaymentMethod('googlepay')}
-                >
-                  <HStack>
-                    <Icon as={Mail} color="primary.500" />
-                    <Text fontWeight="bold">Google Pay</Text>
-                    {paymentMethod === 'googlepay' && (
-                      <Badge colorScheme="green" ml="auto">Selected</Badge>
-                    )}
-                  </HStack>
-                  <Text fontSize="sm" color="gray.500" mt={2}>
-                    Pay directly through Google Pay app
-                  </Text>
+                <Box>
+                  <Text fontWeight="bold" mb={2}>Customer Information:</Text>
+                  <Text>{customerInfo.name}</Text>
+                  <Text>{customerInfo.email}</Text>
+                  <Text>{customerInfo.phone}</Text>
                 </Box>
                 
-                {/* Custom UPI ID Option */}
-                <Box 
-                  borderWidth={paymentMethod === 'custom' ? 2 : 1} 
-                  borderRadius="lg" 
-                  p={4}
-                  borderColor={paymentMethod === 'custom' ? 'primary.500' : 'gray.200'}
-                  cursor="pointer"
-                  onClick={() => setPaymentMethod('custom')}
-                >
-                  <HStack>
-                    <Icon as={MapPin} color="primary.500" />
-                    <Text fontWeight="bold">Custom UPI ID</Text>
-                    {paymentMethod === 'custom' && (
-                      <Badge colorScheme="green" ml="auto">Selected</Badge>
-                    )}
-                  </HStack>
-                  <Text fontSize="sm" color="gray.500" mt={2}>
-                    Enter your own UPI ID for payment
-                  </Text>
-                  
-                  {paymentMethod === 'custom' && (
-                    <FormControl mt={3} isRequired>
-                      <FormLabel>Enter your UPI ID</FormLabel>
-                      <Input
-                        placeholder="example@upi"
-                        value={customUpiId}
-                        onChange={(e) => setCustomUpiId(e.target.value)}
-                      />
-                      <Text fontSize="xs" color="gray.500" mt={1}>
-                        Format: username@bank or mobile@upi
-                      </Text>
-                    </FormControl>
-                  )}
+                <Box>
+                  <Text fontWeight="bold" mb={2}>Selected Payment Method:</Text>
+                  <Badge colorScheme={
+                    paymentMethod === 'phonepe' ? 'purple' :
+                    paymentMethod === 'googlepay' ? 'blue' :
+                    paymentMethod === 'paytm' ? 'orange' : 'green'
+                  }>
+                    {paymentMethod === 'phonepe' ? 'PhonePe' :
+                     paymentMethod === 'googlepay' ? 'Google Pay' :
+                     paymentMethod === 'paytm' ? 'Paytm' : 'Cashfree'}
+                  </Badge>
                 </Box>
-                
-                {/* Pay Now Button */}
-                <Button
-                  colorScheme="primary"
-                  size="lg"
-                  onClick={() => {
-                    // Re-initiate payment with selected method
-                    initiateUpiPayment(orderId, selectedItemsTotal);
-                    // Restart auto-verification
-                    startAutoVerification(orderId);
-                  }}
-                  isDisabled={paymentMethod === 'custom' && !customUpiId}
-                >
-                  Pay Now ₹{selectedItemsTotal.toFixed(2)}
-                </Button>
               </VStack>
-            </Box>
-
-            <Box borderWidth={1} borderRadius="lg" p={6}>
-              <Heading size="md" mb={4}>Payment Instructions</Heading>
-              <UnorderedList spacing={2} mb={4}>
-                <ListItem>Click "Pay Now" to initiate payment with your selected method</ListItem>
-                <ListItem>Complete the payment in your UPI app</ListItem>
-                <ListItem>We'll automatically detect payment completion</ListItem>
-                {autoVerifying && (
-                  <ListItem>
-                    <Text color="green.500">
-                      We're automatically checking for payment confirmation...
-                    </Text>
-                  </ListItem>
-                )}
-              </UnorderedList>
-              
-              <Flex direction={{ base: 'column', md: 'row' }} gap={6} align="center">
-                <Box textAlign="center">
-                  {/* Dynamic QR Code with UPI ID and amount */}
-                  <QRCodeSVG
-                    value={`upi://pay?pa=${storeUpiId}&pn=${encodeURIComponent(import.meta.env.VITE_STORE_MERCHANT_NAME || 'Herambha Dryfruits')}&am=${selectedItemsTotal}&cu=INR`}
-                    size={{ base: 150, md: 200 }}
-                    level={'H'}
-                    includeMargin={true}
-                  />
-                  <Text fontSize="sm" mt={2} color="gray.500">
-                    Scan QR code with any UPI app
-                  </Text>
-                </Box>
-                
-                <VStack align="stretch" spacing={4} flex={1}>
-                  <Box>
-                    <Text fontWeight="bold" mb={2}>Store UPI ID:</Text>
-                    <HStack flexWrap="wrap">
-                      <Text fontSize={{ base: 'sm', md: 'md' }} wordBreak="break-all">{storeUpiId}</Text>
-                      <Button 
-                        size="sm" 
-                        leftIcon={<Copy size={16} />} 
-                        onClick={copyUpiId}
-                        flexShrink={0}
-                      >
-                        Copy
-                      </Button>
-                    </HStack>
-                  </Box>
-                  
-                  <Box>
-                    <Text fontWeight="bold" mb={2}>Amount to Pay:</Text>
-                    <Text fontSize={{ base: 'xl', md: '2xl' }} color="primary.500">₹{selectedItemsTotal.toFixed(2)}</Text>
-                  </Box>
-                  
-                  {autoVerifying && (
-                    <Box>
-                      <Text fontWeight="bold" mb={2}>Auto-Verification:</Text>
-                      <HStack>
-                        <Spinner size="sm" />
-                        <Text fontSize="sm">Checking for payment confirmation...</Text>
-                      </HStack>
-                    </Box>
-                  )}
-                </VStack>
-              </Flex>
-
-            </Box>
-
-            <Box borderWidth={1} borderRadius="lg" p={6}>
-              <Heading size="md" mb={4}>Manual Payment Verification</Heading>
-              <Text mb={4}>
-                If auto-verification doesn't work, you can manually verify your payment by entering the UTR number below.
-              </Text>
-              <FormControl isRequired isInvalid={!!errors.utrNumber}>
-                <FormLabel>UTR Number</FormLabel>
-                <Input
-                  placeholder="Enter 12-digit UTR number"
-                  value={utrNumber}
-                  onChange={handleUtrChange}
-                  maxLength={12}
-                />
-                {errors.utrNumber && (
-                  <Text color="red.500" fontSize="sm" mt={1}>{errors.utrNumber}</Text>
-                )}
-                <Text fontSize="sm" color="gray.500" mt={2}>
-                  The UTR number can be found in your UPI app transaction details
-                </Text>
-              </FormControl>
               
               <Button
-                colorScheme="primary"
-                onClick={handleVerifyPayment}
-                isLoading={loading}
-                mt={4}
+                colorScheme={
+                  paymentMethod === 'phonepe' ? 'purple' :
+                  paymentMethod === 'googlepay' ? 'blue' :
+                  paymentMethod === 'paytm' ? 'orange' : 'green'
+                }
                 size="lg"
+                onClick={handlePaymentSubmit}
+                isLoading={paymentProcessing}
+                loadingText="Processing Payment"
                 width="full"
+                mt={6}
               >
-                Verify Payment Manually
+                Pay with {paymentMethod === 'phonepe' ? 'PhonePe' :
+                          paymentMethod === 'googlepay' ? 'Google Pay' :
+                          paymentMethod === 'paytm' ? 'Paytm' : 'Cashfree'} ₹{selectedItemsTotal.toFixed(2)}
               </Button>
+              
+              <Text fontSize="sm" color="gray.500" mt={4} textAlign="center">
+                {paymentMethod !== 'cashfree' 
+                  ? 'You will be redirected to the UPI app to complete your payment' 
+                  : 'Secured by Cashfree • PCI DSS Compliant'}
+              </Text>
             </Box>
           </VStack>
         ) : (
           // Customer info form
           <VStack spacing={6} align="stretch">
-            <Box borderWidth={1} borderRadius="lg" p={6}>
+            <Box borderWidth={1} borderRadius="lg" p={{ base: 4, md: 6 }}>
               <Heading size="md" mb={4}>Customer Information</Heading>
               
               {/* Address Selection */}
@@ -1121,6 +1019,29 @@ const Checkout = () => {
                   <Text>₹{selectedItemsTotal.toFixed(2)}</Text>
                 </HStack>
               </VStack>
+              
+              <Divider my={6} />
+              
+              <Heading size="md" mb={4}>Payment Method</Heading>
+              <RadioGroup onChange={setPaymentMethod} value={paymentMethod} mb={6}>
+                <VStack align="stretch" spacing={3}>
+                  <Radio value="phonepe" colorScheme="purple">
+                    <HStack>
+                      <Text>PhonePe</Text>
+                      <Badge colorScheme="purple">Recommended</Badge>
+                    </HStack>
+                  </Radio>
+                  <Radio value="googlepay" colorScheme="blue">
+                    <Text>Google Pay</Text>
+                  </Radio>
+                  <Radio value="paytm" colorScheme="orange">
+                    <Text>Paytm</Text>
+                  </Radio>
+                  <Radio value="cashfree" colorScheme="green">
+                    <Text>Credit/Debit Card & Net Banking (Cashfree)</Text>
+                  </Radio>
+                </VStack>
+              </RadioGroup>
               
               <Button
                 colorScheme="primary"

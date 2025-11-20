@@ -21,6 +21,7 @@
     "@chakra-ui/react": "^2.10.5",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
+    "cashfree-pg-sdk-javascript": "^2.0.8",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^4.21.1",
